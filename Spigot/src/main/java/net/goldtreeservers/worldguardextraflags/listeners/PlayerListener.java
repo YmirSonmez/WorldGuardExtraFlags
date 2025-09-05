@@ -6,6 +6,7 @@ import com.sk89q.worldguard.LocalPlayer;
 import com.sk89q.worldguard.bukkit.WorldGuardPlugin;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import com.sk89q.worldguard.session.SessionManager;
+import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -56,6 +57,30 @@ public class PlayerListener implements Listener
 		Player player = event.getPlayer();
 		
 		player.removeMetadata(WorldGuardUtils.PREVENT_TELEPORT_LOOP_META, this.plugin);
+	}
+
+	@EventHandler(priority = EventPriority.HIGHEST)
+	public void onPlayerTeleportPreventEvent(PlayerTeleportEvent event)
+	{
+		Player player = event.getPlayer();
+
+		if(event.getCause() == PlayerTeleportEvent.TeleportCause.COMMAND ||event.getCause() == PlayerTeleportEvent.TeleportCause.PLUGIN){
+			LocalPlayer localPlayer = this.worldGuardPlugin.wrapPlayer(player);
+
+			if (this.sessionManager.hasBypass(localPlayer, localPlayer.getWorld()))
+			{
+				return;
+			}
+
+			org.bukkit.Location loc = event.getTo();
+			if (loc != null){
+				if (this.regionContainer.createQuery().queryState(BukkitAdapter.adapt(event.getTo()), localPlayer, Flags.TELEPORT_PREVENT) == State.ALLOW)
+				{
+					event.setCancelled(true);
+					player.sendMessage(ChatColor.RED + "Bu bölgeye ışınlanamazsınız!");
+				}
+			}
+		}
 	}
 
 	@EventHandler
