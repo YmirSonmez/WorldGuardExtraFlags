@@ -12,6 +12,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
@@ -82,6 +83,25 @@ public class PlayerListener implements Listener
 			}
 		}
 	}
+
+
+	@EventHandler
+	public void onMaceUse(EntityDamageByEntityEvent event) {
+		if (!(event.getDamager() instanceof Player)) return;
+
+		Player player = (Player) event.getDamager();
+		LocalPlayer localPlayer = worldGuardPlugin.wrapPlayer(player);
+		ApplicableRegionSet regions = regionContainer.createQuery().getApplicableRegions(localPlayer.getLocation());
+
+		if (player.getInventory().getItemInMainHand().getType() == Material.MACE) {
+			State flagState = regions.queryState(localPlayer, Flags.PREVENT_MACE);
+			if (flagState == State.DENY) {
+				event.setCancelled(true);
+				player.sendMessage(ChatColor.RED + "Bu bölgede mace kullanamazsınız!");
+			}
+		}
+	}
+
 
 	@EventHandler
 	public void onPlayerDeathEvent(PlayerDeathEvent event)
