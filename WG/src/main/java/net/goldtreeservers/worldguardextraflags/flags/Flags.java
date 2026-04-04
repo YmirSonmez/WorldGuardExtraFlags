@@ -57,6 +57,8 @@ public final class Flags
 	public final static StateFlag FROSTWALKER = new StateFlag("frostwalker", true);
 	
 	public final static StateFlag NETHER_PORTALS = new StateFlag("nether-portals", true);
+	public final static StateFlag EGG_HATCHING = new StateFlag("egg-hatching", true);
+	public final static StateFlag SPAWN_EGG_USE = new StateFlag("spawn-egg-use", true);
 
 	public final static ForcedStateFlag GLIDE = new ForcedStateFlag("glide");
 	

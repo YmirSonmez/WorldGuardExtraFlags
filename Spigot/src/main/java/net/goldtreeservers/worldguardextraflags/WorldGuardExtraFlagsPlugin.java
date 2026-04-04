@@ -86,6 +86,8 @@ public class WorldGuardExtraFlagsPlugin extends JavaPlugin
 			flagRegistry.register(Flags.PLAY_SOUNDS);
 			flagRegistry.register(Flags.FROSTWALKER);
 			flagRegistry.register(Flags.NETHER_PORTALS);
+			flagRegistry.register(Flags.EGG_HATCHING);
+			flagRegistry.register(Flags.SPAWN_EGG_USE);
 			flagRegistry.register(Flags.GLIDE);
 			flagRegistry.register(Flags.CHUNK_UNLOAD);
 			flagRegistry.register(Flags.ITEM_DURABILITY);

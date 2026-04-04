@@ -16,12 +16,17 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.player.PlayerEggThrowEvent;
 import org.bukkit.event.player.PlayerGameModeChangeEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerItemDamageEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.event.block.Action;
+import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.potion.PotionEffect;
@@ -165,6 +170,57 @@ public class PlayerListener implements Listener
 		if (respawnLocation != null)
 		{
 			event.setRespawnLocation(BukkitAdapter.adapt(respawnLocation));
+		}
+	}
+
+	@EventHandler
+	public void onPlayerEggThrowEvent(PlayerEggThrowEvent event)
+	{
+		Player player = event.getPlayer();
+		LocalPlayer localPlayer = this.worldGuardPlugin.wrapPlayer(player);
+
+		if (this.sessionManager.hasBypass(localPlayer, localPlayer.getWorld()))
+		{
+			return;
+		}
+
+		if (this.regionContainer.createQuery().queryState(localPlayer.getLocation(), localPlayer, Flags.EGG_HATCHING) == State.DENY)
+		{
+			event.setHatching(false);
+			event.setNumHatches((byte) 0);
+		}
+	}
+
+	@EventHandler(ignoreCancelled = true)
+	public void onPlayerInteractEvent(PlayerInteractEvent event)
+	{
+		if (event.getHand() != EquipmentSlot.HAND)
+		{
+			return;
+		}
+
+		if (event.getAction() != Action.RIGHT_CLICK_BLOCK)
+		{
+			return;
+		}
+
+		ItemStack item = event.getItem();
+		if (item == null || !item.getType().name().endsWith("_SPAWN_EGG"))
+		{
+			return;
+		}
+
+		Player player = event.getPlayer();
+		LocalPlayer localPlayer = this.worldGuardPlugin.wrapPlayer(player);
+
+		if (this.sessionManager.hasBypass(localPlayer, localPlayer.getWorld()))
+		{
+			return;
+		}
+
+		if (this.regionContainer.createQuery().queryState(localPlayer.getLocation(), localPlayer, Flags.SPAWN_EGG_USE) == State.DENY)
+		{
+			event.setCancelled(true);
 		}
 	}
 	
