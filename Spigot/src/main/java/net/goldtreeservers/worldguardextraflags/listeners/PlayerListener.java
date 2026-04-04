@@ -60,7 +60,7 @@ public class PlayerListener implements Listener
 		player.removeMetadata(WorldGuardUtils.PREVENT_TELEPORT_LOOP_META, this.plugin);
 	}
 
-	@EventHandler(priority = EventPriority.HIGHEST)
+	@EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
 	public void onPlayerTeleportPreventEvent(PlayerTeleportEvent event)
 	{
 		Player player = event.getPlayer();
@@ -295,5 +295,11 @@ public class PlayerListener implements Listener
 		{
 			player.setAllowFlight(value);
 		}
+	}
+
+	@EventHandler(priority = EventPriority.MONITOR)
+	public void onPlayerQuitEvent(org.bukkit.event.player.PlayerQuitEvent event)
+	{
+		this.plugin.getPlayerCollisionManager().clearPlayer(event.getPlayer());
 	}
 }

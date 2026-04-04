@@ -16,6 +16,8 @@ import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import com.sk89q.worldguard.session.SessionManager;
 import net.goldtreeservers.worldguardextraflags.listeners.*;
+import net.goldtreeservers.worldguardextraflags.scoreboard.PlayerCollisionManager;
+import net.goldtreeservers.worldguardextraflags.util.PaperCollisionSupport;
 import net.goldtreeservers.worldguardextraflags.wg.handlers.*;
 import org.bstats.bukkit.Metrics;
 import org.bukkit.World;
@@ -44,6 +46,7 @@ public class WorldGuardExtraFlagsPlugin extends JavaPlugin
 	@Getter private SessionManager sessionManager;
 
 	@Getter private ProtocolLibHelper protocolLibHelper;
+	@Getter private PlayerCollisionManager playerCollisionManager;
 	
 	public WorldGuardExtraFlagsPlugin()
 	{
@@ -70,6 +73,7 @@ public class WorldGuardExtraFlagsPlugin extends JavaPlugin
 			flagRegistry.register(Flags.WALK_SPEED);
 			flagRegistry.register(Flags.KEEP_INVENTORY);
 			flagRegistry.register(Flags.KEEP_EXP);
+			flagRegistry.register(Flags.PLAYER_COLLISIONS);
 			flagRegistry.register(Flags.CHAT_PREFIX);
 			flagRegistry.register(Flags.CHAT_SUFFIX);
 			flagRegistry.register(Flags.BLOCKED_EFFECTS);
@@ -116,6 +120,13 @@ public class WorldGuardExtraFlagsPlugin extends JavaPlugin
 	{
 		this.regionContainer = this.worldGuard.getPlatform().getRegionContainer();
 		this.sessionManager = this.worldGuard.getPlatform().getSessionManager();
+		this.playerCollisionManager = new PlayerCollisionManager();
+
+		Boolean playerCollisionsEnabled = PaperCollisionSupport.isPlayerCollisionGloballyEnabled();
+		if (Boolean.FALSE.equals(playerCollisionsEnabled))
+		{
+			this.getLogger().warning("Paper/Leaf global collisions.enablePlayerCollisions is false. player-collisions flag cannot force player collision until that setting is enabled.");
+		}
 
 		this.sessionManager.registerHandler(TeleportOnEntryFlagHandler.FACTORY(plugin), null);
 		this.sessionManager.registerHandler(TeleportOnExitFlagHandler.FACTORY(plugin), null);
@@ -128,6 +139,7 @@ public class WorldGuardExtraFlagsPlugin extends JavaPlugin
 		this.sessionManager.registerHandler(PlaySoundsFlagHandler.FACTORY(plugin), null);
 		this.sessionManager.registerHandler(BlockedEffectsFlagHandler.FACTORY(), null);
 		this.sessionManager.registerHandler(GiveEffectsFlagHandler.FACTORY(), null);
+		this.sessionManager.registerHandler(PlayerCollisionsFlagHandler.FACTORY(), null);
 
 		this.sessionManager.registerHandler(CommandOnEntryFlagHandler.FACTORY(), null);
 		this.sessionManager.registerHandler(CommandOnExitFlagHandler.FACTORY(), null);
@@ -165,6 +177,15 @@ public class WorldGuardExtraFlagsPlugin extends JavaPlugin
 		this.setupMetrics();
 	}
 
+	@Override
+	public void onDisable()
+	{
+		if (this.playerCollisionManager != null)
+		{
+			this.playerCollisionManager.shutdown();
+		}
+	}
+	
 	public void doUnloadChunkFlagCheck(org.bukkit.World world)
 	{
 		RegionManager regionManager = this.regionContainer.get(BukkitAdapter.adapt(world));
@@ -192,7 +213,7 @@ public class WorldGuardExtraFlagsPlugin extends JavaPlugin
 			}
 		}
 	}
-	
+
 	private void setupMetrics()
 	{
 		final int bStatsPluginId = 7301;
