@@ -94,6 +94,8 @@ public class WorldGuardExtraFlagsPlugin extends JavaPlugin
 			flagRegistry.register(Flags.JOIN_LOCATION);
 			flagRegistry.register(Flags.TELEPORT_PREVENT);
 			flagRegistry.register(Flags.PREVENT_MACE);
+			flagRegistry.register(Flags.PREVENT_WATER_FLOW);
+			flagRegistry.register(Flags.PREVENT_LAVA_FLOW);
 		}
 		catch (Exception e)
 		{

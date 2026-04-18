@@ -12,6 +12,7 @@ import org.bukkit.block.BlockState;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockFromToEvent;
 import org.bukkit.event.block.EntityBlockFormEvent;
 
 import com.sk89q.worldguard.protection.flags.StateFlag.State;
@@ -25,7 +26,7 @@ public class BlockListener implements Listener
 	private final WorldGuardPlugin worldGuardPlugin;
 	private final RegionContainer regionContainer;
 	private final SessionManager sessionManager;
-	
+
 	@EventHandler(ignoreCancelled = true)
 	public void onEntityBlockFormEvent(EntityBlockFormEvent event)
 	{
@@ -49,6 +50,38 @@ public class BlockListener implements Listener
 			}
 
 			if (this.regionContainer.createQuery().queryValue(location, localPlayer, Flags.FROSTWALKER) == State.DENY)
+			{
+				event.setCancelled(true);
+			}
+		}
+	}
+
+	@EventHandler(ignoreCancelled = true)
+	public void onBlockFromTo(BlockFromToEvent event)
+	{
+		Material type = event.getBlock().getType();
+
+		boolean isWater = type == Material.WATER;
+		boolean isLava = type == Material.LAVA;
+
+		if (!isWater && !isLava)
+		{
+			return;
+		}
+
+		// Check where the fluid is flowing TO
+		Location toLocation = BukkitAdapter.adapt(event.getToBlock().getLocation());
+
+		if (isWater)
+		{
+			if (this.regionContainer.createQuery().queryValue(toLocation, null, Flags.PREVENT_WATER_FLOW) == State.ALLOW)
+			{
+				event.setCancelled(true);
+			}
+		}
+		else
+		{
+			if (this.regionContainer.createQuery().queryValue(toLocation, null, Flags.PREVENT_LAVA_FLOW) == State.ALLOW)
 			{
 				event.setCancelled(true);
 			}
