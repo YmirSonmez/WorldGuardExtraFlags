@@ -7,236 +7,282 @@ import org.bukkit.scoreboard.Team;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
+import java.util.logging.Logger;
 
-public class PlayerCollisionManager
+public final class PlayerCollisionManager
 {
-	private static final Team.Option COLLISION_OPTION = Team.Option.COLLISION_RULE;
-	private static final String TEAM_PREFIX = "wgefpc_";
+    private static final Team.Option COLLISION_OPTION = Team.Option.COLLISION_RULE;
+    private static final String TEAM_PREFIX = "wgefpc_";
 
-	private final Map<UUID, PlayerCollisionOverride> playerOverrides = new HashMap<>();
-	private final Map<TeamKey, TeamOverrideState> teamOverrides = new HashMap<>();
+    private final TabCollisionBridge tabBridge;
 
-	public void updatePlayer(Player player, Boolean collisionsEnabled)
-	{
-		if (collisionsEnabled == null)
-		{
-			this.clearPlayer(player);
-			return;
-		}
+    // Per-player original collidable state to restore on exit
+    private final Map<UUID, Boolean> originalCollidable = new HashMap<>();
 
-		Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
-		String entry = player.getName();
-		Team currentTeam = scoreboard.getEntryTeam(entry);
-		PlayerCollisionOverride currentOverride = this.playerOverrides.get(player.getUniqueId());
+    // Scoreboard team tracking (used only when TAB is absent)
+    private final Map<UUID, PlayerState> playerStates = new HashMap<>();
+    private final Map<TeamKey, TeamState> teamStates = new HashMap<>();
 
-		if (this.matchesCurrentState(currentOverride, scoreboard, currentTeam, collisionsEnabled))
-		{
-			player.setCollidable(collisionsEnabled);
+    public PlayerCollisionManager(Logger logger)
+    {
+        TabCollisionBridge bridge = null;
+        if (Bukkit.getPluginManager().getPlugin("TAB") != null)
+        {
+            try
+            {
+                bridge = new TabCollisionBridge(logger);
+            }
+            catch (Exception e)
+            {
+                logger.warning("[PlayerCollision] TAB detected but API init failed: " + e.getMessage()
+                        + " — falling back to scoreboard team approach.");
+            }
+        }
+        this.tabBridge = bridge;
+    }
 
-			if (!currentOverride.trackingOnly)
-			{
-				Team team = scoreboard.getTeam(currentOverride.teamName);
-				if (team != null)
-				{
-					team.setOption(COLLISION_OPTION, currentOverride.desiredStatus);
-				}
-			}
+    public void updatePlayer(Player player, Boolean enabled)
+    {
+        if (enabled == null)
+        {
+            clearPlayer(player);
+            return;
+        }
 
-			return;
-		}
+        UUID uuid = player.getUniqueId();
 
-		this.clearPlayer(player);
-		this.applyOverride(player, collisionsEnabled, scoreboard, scoreboard.getEntryTeam(entry));
-	}
+        if (!originalCollidable.containsKey(uuid))
+        {
+            originalCollidable.put(uuid, player.isCollidable());
+        }
 
-	public void refreshTrackedPlayers()
-	{
-		if (this.playerOverrides.isEmpty())
-		{
-			return;
-		}
+        player.setCollidable(enabled);
 
-		for (Player player : Bukkit.getOnlinePlayers())
-		{
-			PlayerCollisionOverride override = this.playerOverrides.get(player.getUniqueId());
-			if (override != null)
-			{
-				this.updatePlayer(player, override.collisionsEnabled);
-			}
-		}
-	}
+        if (tabBridge != null)
+        {
+            try
+            {
+                tabBridge.setCollision(player, enabled);
+            }
+            catch (Exception ignored)
+            {
+            }
+        }
+        else
+        {
+            updateScoreboard(player, uuid, enabled);
+        }
+    }
 
-	public void clearPlayer(Player player)
-	{
-		PlayerCollisionOverride override = this.playerOverrides.remove(player.getUniqueId());
-		if (override == null)
-		{
-			return;
-		}
+    public void clearPlayer(Player player)
+    {
+        UUID uuid = player.getUniqueId();
 
-		player.setCollidable(override.originalCollidable);
+        Boolean original = originalCollidable.remove(uuid);
+        if (original != null)
+        {
+            player.setCollidable(original);
+        }
 
-		if (override.trackingOnly)
-		{
-			return;
-		}
+        if (tabBridge != null)
+        {
+            try
+            {
+                tabBridge.setCollision(player, null);
+            }
+            catch (Exception ignored)
+            {
+            }
+        }
+        else
+        {
+            releaseScoreboard(player, uuid);
+        }
+    }
 
-		TeamKey teamKey = new TeamKey(override.scoreboard, override.teamName);
-		TeamOverrideState teamState = this.teamOverrides.get(teamKey);
-		Team team = override.scoreboard.getTeam(override.teamName);
+    public void shutdown()
+    {
+        for (Player player : Bukkit.getOnlinePlayers())
+        {
+            clearPlayer(player);
+        }
+        originalCollidable.clear();
+        playerStates.clear();
+        teamStates.clear();
+    }
 
-		if (team != null && override.createdTeam && team.hasEntry(player.getName()))
-		{
-			team.removeEntry(player.getName());
-		}
+    // ── scoreboard team approach (no TAB) ────────────────────────────
 
-		if (teamState == null)
-		{
-			if (team != null && override.createdTeam && team.getEntries().isEmpty())
-			{
-				team.unregister();
-			}
+    private void updateScoreboard(Player player, UUID uuid, boolean enabled)
+    {
+        Scoreboard board = mainBoard();
+        PlayerState current = playerStates.get(uuid);
 
-			return;
-		}
+        if (current != null && current.board == board && current.enabled == enabled
+                && isTeamIntact(current, player.getName()))
+        {
+            enforceTeam(current);
+            return;
+        }
 
-		teamState.references--;
-		if (teamState.references > 0)
-		{
-			return;
-		}
+        if (current != null)
+        {
+            releaseTeam(player.getName(), current);
+        }
 
-		if (team != null)
-		{
-			team.setOption(COLLISION_OPTION, teamState.originalStatus);
+        acquireTeam(player, uuid, enabled, board);
+    }
 
-			if (override.createdTeam && team.getEntries().isEmpty())
-			{
-				team.unregister();
-			}
-		}
+    private void releaseScoreboard(Player player, UUID uuid)
+    {
+        PlayerState state = playerStates.remove(uuid);
+        if (state != null)
+        {
+            releaseTeam(player.getName(), state);
+        }
+    }
 
-		this.teamOverrides.remove(teamKey);
-	}
+    private void acquireTeam(Player player, UUID uuid, boolean enabled, Scoreboard board)
+    {
+        Team currentTeam = board.getEntryTeam(player.getName());
 
-	public void shutdown()
-	{
-		for (Player player : Bukkit.getOnlinePlayers())
-		{
-			this.clearPlayer(player);
-		}
+        if (enabled && currentTeam == null)
+        {
+            // No team needed for enabled collision — default is ALWAYS
+            playerStates.put(uuid, new PlayerState(board, null, true, null, false));
+            return;
+        }
 
-		this.playerOverrides.clear();
-		this.teamOverrides.clear();
-	}
+        boolean createdTeam = false;
+        if (currentTeam == null)
+        {
+            String name = managedTeamName(uuid);
+            currentTeam = board.getTeam(name);
+            if (currentTeam == null)
+            {
+                currentTeam = board.registerNewTeam(name);
+            }
+            if (!currentTeam.hasEntry(player.getName()))
+            {
+                currentTeam.addEntry(player.getName());
+            }
+            createdTeam = true;
+        }
 
-	private boolean matchesCurrentState(PlayerCollisionOverride currentOverride, Scoreboard scoreboard, Team currentTeam, boolean collisionsEnabled)
-	{
-		if (currentOverride == null || currentOverride.scoreboard != scoreboard || currentOverride.collisionsEnabled != collisionsEnabled)
-		{
-			return false;
-		}
+        String teamName = currentTeam.getName();
+        Team.OptionStatus desired = enabled ? Team.OptionStatus.ALWAYS : Team.OptionStatus.NEVER;
 
-		if (collisionsEnabled && currentTeam == null)
-		{
-			return currentOverride.trackingOnly;
-		}
+        TeamKey key = new TeamKey(board, teamName);
+        TeamState teamState = teamStates.get(key);
+        if (teamState == null)
+        {
+            teamState = new TeamState(currentTeam.getOption(COLLISION_OPTION));
+            teamStates.put(key, teamState);
+        }
 
-		if (currentTeam == null)
-		{
-			return false;
-		}
+        teamState.refs++;
+        currentTeam.setOption(COLLISION_OPTION, desired);
 
-		return !currentOverride.trackingOnly && Objects.equals(currentOverride.teamName, currentTeam.getName());
-	}
+        playerStates.put(uuid, new PlayerState(board, teamName, enabled, desired, createdTeam));
+    }
 
-	private void applyOverride(Player player, boolean collisionsEnabled, Scoreboard scoreboard, Team currentTeam)
-	{
-		boolean originalCollidable = player.isCollidable();
-		player.setCollidable(collisionsEnabled);
+    private void releaseTeam(String playerName, PlayerState state)
+    {
+        if (state.teamName == null)
+        {
+            return;
+        }
 
-		if (collisionsEnabled && currentTeam == null)
-		{
-			this.playerOverrides.put(player.getUniqueId(), new PlayerCollisionOverride(scoreboard, null, collisionsEnabled, null, false, true, originalCollidable));
-			return;
-		}
+        TeamKey key = new TeamKey(state.board, state.teamName);
+        TeamState teamState = teamStates.get(key);
+        Team team = state.board.getTeam(state.teamName);
 
-		Team team = currentTeam;
-		boolean createdTeam = false;
-		if (team == null)
-		{
-			createdTeam = true;
+        if (state.createdTeam && team != null && team.hasEntry(playerName))
+        {
+            team.removeEntry(playerName);
+        }
 
-			String teamName = this.getManagedTeamName(player.getUniqueId());
-			team = scoreboard.getTeam(teamName);
-			if (team == null)
-			{
-				team = scoreboard.registerNewTeam(teamName);
-			}
+        if (teamState == null)
+        {
+            if (state.createdTeam && team != null && team.getEntries().isEmpty())
+            {
+                team.unregister();
+            }
+            return;
+        }
 
-			if (!team.hasEntry(player.getName()))
-			{
-				team.addEntry(player.getName());
-			}
-		}
+        teamState.refs--;
+        if (teamState.refs > 0)
+        {
+            return;
+        }
 
-		Team.OptionStatus desiredStatus = collisionsEnabled ? Team.OptionStatus.ALWAYS : Team.OptionStatus.NEVER;
-		TeamKey teamKey = new TeamKey(scoreboard, team.getName());
-		TeamOverrideState teamState = this.teamOverrides.get(teamKey);
-		if (teamState == null)
-		{
-			teamState = new TeamOverrideState(team.getOption(COLLISION_OPTION), 0);
-			this.teamOverrides.put(teamKey, teamState);
-		}
+        if (team != null)
+        {
+            team.setOption(COLLISION_OPTION, teamState.originalStatus);
+            if (state.createdTeam && team.getEntries().isEmpty())
+            {
+                team.unregister();
+            }
+        }
 
-		teamState.references++;
-		team.setOption(COLLISION_OPTION, desiredStatus);
+        teamStates.remove(key);
+    }
 
-		this.playerOverrides.put(player.getUniqueId(), new PlayerCollisionOverride(scoreboard, team.getName(), collisionsEnabled, desiredStatus, createdTeam, false, originalCollidable));
-	}
+    private static void enforceTeam(PlayerState state)
+    {
+        if (state.teamName == null)
+        {
+            return;
+        }
+        Team team = state.board.getTeam(state.teamName);
+        if (team != null)
+        {
+            team.setOption(COLLISION_OPTION, state.desired);
+        }
+    }
 
-	private String getManagedTeamName(UUID uuid)
-	{
-		return TEAM_PREFIX + uuid.toString().replace("-", "").substring(0, 8);
-	}
+    private static boolean isTeamIntact(PlayerState state, String playerName)
+    {
+        if (state.teamName == null)
+        {
+            return true;
+        }
+        Team team = state.board.getTeam(state.teamName);
+        return team != null && team.hasEntry(playerName);
+    }
 
-	private record TeamKey(Scoreboard scoreboard, String teamName)
-	{
-	}
+    private static Scoreboard mainBoard()
+    {
+        return Bukkit.getScoreboardManager().getMainScoreboard();
+    }
 
-	private static final class TeamOverrideState
-	{
-		private final Team.OptionStatus originalStatus;
-		private int references;
+    private static String managedTeamName(UUID uuid)
+    {
+        return TEAM_PREFIX + uuid.toString().replace("-", "").substring(0, 8);
+    }
 
-		private TeamOverrideState(Team.OptionStatus originalStatus, int references)
-		{
-			this.originalStatus = originalStatus;
-			this.references = references;
-		}
-	}
+    // ── data types ───────────────────────────────────────────────────
 
-	private static final class PlayerCollisionOverride
-	{
-		private final Scoreboard scoreboard;
-		private final String teamName;
-		private final boolean collisionsEnabled;
-		private final Team.OptionStatus desiredStatus;
-		private final boolean createdTeam;
-		private final boolean trackingOnly;
-		private final boolean originalCollidable;
+    private record TeamKey(Scoreboard board, String teamName) {}
 
-		private PlayerCollisionOverride(Scoreboard scoreboard, String teamName, boolean collisionsEnabled, Team.OptionStatus desiredStatus, boolean createdTeam, boolean trackingOnly, boolean originalCollidable)
-		{
-			this.scoreboard = scoreboard;
-			this.teamName = teamName;
-			this.collisionsEnabled = collisionsEnabled;
-			this.desiredStatus = desiredStatus;
-			this.createdTeam = createdTeam;
-			this.trackingOnly = trackingOnly;
-			this.originalCollidable = originalCollidable;
-		}
-	}
+    private record PlayerState(
+            Scoreboard board,
+            String teamName,           // null = no team needed (tracking-only)
+            boolean enabled,
+            Team.OptionStatus desired, // null = tracking-only
+            boolean createdTeam
+    ) {}
+
+    private static final class TeamState
+    {
+        final Team.OptionStatus originalStatus;
+        int refs;
+
+        TeamState(Team.OptionStatus originalStatus)
+        {
+            this.originalStatus = originalStatus;
+        }
+    }
 }

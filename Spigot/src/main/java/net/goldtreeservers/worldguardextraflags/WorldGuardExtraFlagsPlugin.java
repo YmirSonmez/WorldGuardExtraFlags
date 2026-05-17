@@ -124,7 +124,7 @@ public class WorldGuardExtraFlagsPlugin extends JavaPlugin
 	{
 		this.regionContainer = this.worldGuard.getPlatform().getRegionContainer();
 		this.sessionManager = this.worldGuard.getPlatform().getSessionManager();
-		this.playerCollisionManager = new PlayerCollisionManager();
+		this.playerCollisionManager = new PlayerCollisionManager(getLogger());
 
 		Boolean playerCollisionsEnabled = PaperCollisionSupport.isPlayerCollisionGloballyEnabled();
 		if (Boolean.FALSE.equals(playerCollisionsEnabled))
